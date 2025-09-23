@@ -3,6 +3,7 @@ use crate::{
     task::{exit_current_and_run_next, suspend_current_and_run_next},
     timer::get_time_us,
 };
+use crate::task::TASK_MANAGER;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -41,5 +42,27 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 // TODO: implement the syscall
 pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
     trace!("kernel: sys_trace");
-    -1
+    unsafe{
+		match _trace_request{
+			0=>{
+				(*(_id as *const u8)).into()
+			},
+			1=>{
+				let addr=_id as *mut u8;
+				*addr=_data as u8;
+				0
+			},
+			2=>{
+				{
+					let inner = TASK_MANAGER.inner.exclusive_access();
+					let current_task = inner.current_task;
+					return inner.tasks[current_task].task_trace[_id] as isize;
+				}
+			},
+			_=>{
+				error!("kernel: sys_trace _trace_request should not be{}",_trace_request);
+				-1
+			}
+		}
+	}
 }

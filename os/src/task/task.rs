@@ -7,6 +7,9 @@ use super::TaskContext;
 pub struct TaskControlBlock {
     /// The task status in it's lifecycle
     pub task_status: TaskStatus,
+
+	///
+	pub task_trace:[u16;420],
     /// The task context
     pub task_cx: TaskContext,
 }
