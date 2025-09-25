@@ -6,8 +6,9 @@ use crate::mm::translated_byte_buffer;
 use core::mem::size_of;
 use crate::mm::VirtAddr;
 use crate::mm::VirtPageNum;
-use crate::mm::{frame_alloc};
+use crate::mm::{MapPermission,frame_dealloc};
 use crate::mm::PTEFlags;
+
 use core::slice;
 #[repr(C)]
 #[derive(Debug)]
@@ -149,14 +150,16 @@ pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
 			}
 		}
 		//mem-set的map_one
-		for vpagenum in s.0..e.0{
-			if let Some(frame) = frame_alloc(){
-				mem_set.page_table.map(VirtPageNum(vpagenum),frame.ppn,PTEFlags::from_bits_truncate(((_port & 0x7) << 1) as u8)|PTEFlags::U);
-			}
-			else{
-				return -1;
-			}
-		}
+		// for vpagenum in s.0..e.0{
+		// 	if let Some(frame) = frame_alloc(){
+		// 		info!("alloc page:{}",frame.ppn.0);
+		// 		mem_set.page_table.map(VirtPageNum(vpagenum),frame.ppn,PTEFlags::from_bits_truncate(((_port & 0x7) << 1) as u8)|PTEFlags::U);
+		// 	}
+		// 	else{
+		// 		return -1;
+		// 	}
+		// }
+		mem_set.insert_framed_area(VirtAddr::from(_start), VirtAddr::from(_start+_len), MapPermission::from_bits_truncate(((_port & 0x7) << 1) as u8)|MapPermission::U);
 		//创建页表项，加入到当前任务中的
 		return 0;
 	}
@@ -180,12 +183,11 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
 			//let frame = frame_alloc().unwrap();
 			if let Some(a)=mem_set.translate(VirtPageNum(vpagenum)){
 				if a.is_valid(){
-					//let phy_pagenum=a.ppn();
-					//frame_dealloc(phy_pagenum);
+					let phy_pagenum=a.ppn();
+					frame_dealloc(phy_pagenum);
 					mem_set.page_table.unmap(VirtPageNum(vpagenum));
 				}
-			}
-			
+			}	
 		}
 		//创建页表项，加入到当前任务中的
 		return 0;
