@@ -10,7 +10,8 @@ use crate::trap::{trap_handler, TrapContext};
 pub struct TaskControlBlock {
     /// Save task context
     pub task_cx: TaskContext,
-
+	///
+	pub task_trace:[u16;420],
     /// Maintain the execution status of the current process
     pub task_status: TaskStatus,
 
@@ -60,6 +61,7 @@ impl TaskControlBlock {
             task_cx: TaskContext::goto_trap_return(kernel_stack_top),
             memory_set,
             trap_cx_ppn,
+			task_trace:[0;420],
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
