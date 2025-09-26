@@ -1,6 +1,14 @@
 //! Process management syscalls
 use alloc::sync::Arc;
-
+use crate::task::TaskControlBlock;
+use crate::timer::get_time_us;
+use core::slice;
+use crate::mm::translated_byte_buffer;
+use core::mem::size_of;
+use crate::mm::VirtAddr;
+use crate::mm::VirtPageNum;
+use crate::mm::MapPermission;
+use crate::task::PROCESSOR;
 use crate::{
     loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str},
@@ -106,29 +114,122 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel: sys_get_time");
+    let us = get_time_us();
+	//通过mangger得到*ts的逻辑页
+	//判断逻辑页所在段
+	//判断段属性
+	//copy data
+	unsafe {
+		let cur_task = PROCESSOR.exclusive_access().current().unwrap();
+		let task=cur_task.inner_exclusive_access();
+		let mut tmp=translated_byte_buffer(task.get_user_token(),_ts as *const u8,size_of::<TimeVal>());
+        let time_val= TimeVal {
+            sec: us / 1_000_000,
+            usec: us % 1_000_000,
+        };
+		let time_ptr = &time_val as *const TimeVal;
+		let byte_ptr = time_ptr as *const u8;
+		let src_slice = slice::from_raw_parts(byte_ptr, size_of::<TimeVal>());
+		let mut offset = 0;
+        for buf in tmp.iter_mut() {
+            let len = buf.len();
+            if offset + len > src_slice.len() {
+                // 最后一次复制可能不满
+                let remain = src_slice.len() - offset;
+                buf[..remain].copy_from_slice(&src_slice[offset..offset+remain]);
+                break;
+            } else {
+                buf.copy_from_slice(&src_slice[offset..offset+len]);
+                offset += len;
+            }
+        }
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel[{}]: sys_mmap ",current_task().unwrap().pid.0);
+	//找到任务的控制快
+    let cur_task = PROCESSOR.exclusive_access().current().unwrap();
+	let mut task=cur_task.inner_exclusive_access();
+	let mem_set=&mut task.memory_set;
+	//检测参数是否合法
+	let s=VirtAddr::from(_start).floor();
+	let e=VirtAddr::from(_start+_len).ceil();
+	if !VirtAddr::from(_start).aligned(){
+		return -1;
+	}
+	else if _port & !0x7 != 0{
+		return -1;
+	}
+	else if _port & 0x7 == 0{
+		return -1;
+	}
+	else{
+		for vpagenum in s.0..e.0{
+			match mem_set.translate(VirtPageNum(vpagenum)){
+				Some(a)=>{
+					if a.is_valid(){
+						return -1;
+					}
+				},
+				None=>{
+					continue;
+				}
+			}
+		}
+		//mem-set的map_one
+		// for vpagenum in s.0..e.0{
+		// 	if let Some(frame) = frame_alloc(){
+		// 		info!("alloc page:{}",frame.ppn.0);
+		// 		mem_set.page_table.map(VirtPageNum(vpagenum),frame.ppn,PTEFlags::from_bits_truncate(((_port & 0x7) << 1) as u8)|PTEFlags::U);
+		// 	}
+		// 	else{
+		// 		return -1;
+		// 	}
+		// }
+		mem_set.insert_framed_area(VirtAddr::from(_start), VirtAddr::from(_start+_len), MapPermission::from_bits_truncate(((_port & 0x7) << 1) as u8)|MapPermission::U);
+		//创建页表项，加入到当前任务中的
+		return 0;
+	}
 }
 
-/// YOUR JOB: Implement munmap.
+// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel [{}]: sys_munmap!",current_task().unwrap().pid.0);
+    let cur_task = PROCESSOR.exclusive_access().current().unwrap();
+	let mut task=cur_task.inner_exclusive_access();
+	let mem_set=&mut task.memory_set;
+	//检测参数是否合法
+	let s=VirtAddr::from(_start).floor();
+	let e=VirtAddr::from(_start+_len).ceil();
+	if !VirtAddr::from(_start).aligned(){
+		return -1;
+	}
+	else{
+		for vpagenum in s.0..e.0{
+			if let Some(a)=mem_set.translate(VirtPageNum(vpagenum)){
+				if !a.is_valid(){
+					return -1;
+				}
+			}
+		}
+		for vpagenum in s.0..e.0{
+			//let frame = frame_alloc().unwrap();
+			if let Some(a)=mem_set.translate(VirtPageNum(vpagenum)){
+				if a.is_valid(){
+					// let phy_pagenum=a.ppn();
+					// frame_dealloc(phy_pagenum);
+					mem_set.page_table.unmap(VirtPageNum(vpagenum));
+				}
+				
+			}	
+		}
+		//创建页表项，加入到当前任务中的
+		return 0;
+	}
 }
 
 /// change data segment size
@@ -148,14 +249,33 @@ pub fn sys_spawn(_path: *const u8) -> isize {
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // add new task to scheduler
+	let token = current_user_token();
+    let path = translated_str(token, _path);
+	let cur_task=current_task().unwrap();
+	let cur_inner=&mut cur_task.inner_exclusive_access();
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let new_task=Arc::new(TaskControlBlock::new(data));
+		let tmp=new_task.getpid();
+		cur_inner.children.push(new_task.clone());
+		add_task(new_task);
+        tmp as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
-    -1
+	if _prio<2{
+		return -1;
+	}
+    let cur_task = PROCESSOR.exclusive_access().current().unwrap();
+	let mut task=cur_task.inner_exclusive_access();
+	task.priority=_prio as usize;
+	task.priority as isize
 }
