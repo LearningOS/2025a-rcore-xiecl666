@@ -44,6 +44,7 @@ pub mod sbi;
 pub mod sync;
 pub mod syscall;
 pub mod task;
+pub mod loader;
 pub mod timer;
 pub mod trap;
 

@@ -23,8 +23,24 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        self.stride_schedule()
+		//self.ready_queue.pop_front()
     }
+	fn stride_schedule(&mut self)-> Option<Arc<TaskControlBlock>>
+	{
+		let bigstride:usize=65535;
+		let index=self.ready_queue.iter().enumerate().min_by_key(
+									|(_, tck)| tck.inner_exclusive_access().stride).map(|(i, _)| i)?;
+		let task = self.ready_queue.remove(index)?;
+		{
+            // 获取内部可变引用（作用域结束时自动释放）
+            let mut inner = task.inner_exclusive_access();
+            
+            // 更新 stride（处理溢出）
+            inner.stride = inner.stride.wrapping_add(bigstride/inner.priority);
+        }
+        Some(task)
+	}
 }
 
 lazy_static! {
