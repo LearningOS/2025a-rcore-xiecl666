@@ -68,9 +68,6 @@ fn deadlock_detect(tid:usize,mux_id:usize,_type:usize)->bool{
 	if process_inner.enable_deadlock_detect==0{
 		return true;
 	}
-	let mut work: [isize; 5];
-	let all: [(usize, [usize; 5]); 17];
-	let mut need: [(usize, [usize; 5]); 17];
 	if _type==0{
 		let work=process_inner.mux_deadlockdectector.available.clone();
 		if work[mux_id]==0{
@@ -84,9 +81,9 @@ fn deadlock_detect(tid:usize,mux_id:usize,_type:usize)->bool{
 	// 	}
 	// }
 	else{
-		work=process_inner.sem_deadlockdectector.available.clone();
-		all=process_inner.sem_deadlockdectector.allocations.clone();
-		need={
+		let mut work=process_inner.sem_deadlockdectector.available.clone();
+		let all=process_inner.sem_deadlockdectector.allocations.clone();
+		let mut need={
 			let mut arr = [(0, [0; 5]); 17];
 			for (i, elem) in arr.iter_mut().enumerate() {
 				elem.0 = i; // 第一个元素设为1-17
@@ -114,47 +111,47 @@ fn deadlock_detect(tid:usize,mux_id:usize,_type:usize)->bool{
 				}
 			}	
 		}
-	}
-	let mut finish=[false;17];
-	loop {
-		let mut found = false;
-			
-			// Step 2: Find a thread that can be satisfied
-		for i in 0..17 {
-			if !finish[i] {
-				let mut can_allocate = true;
-					
-					// Check if Need[i] <= Work for all resources
-				for j in 0..5 {
-					if need[i].1[j] > work[j] as usize {
-						can_allocate = false;
-						break;
-					}
-				}
-					// Step 3: If found, allocate resources
-				if can_allocate {
-					found = true;
+		let mut finish=[false;17];
+		loop {
+			let mut found = false;
+				
+				// Step 2: Find a thread that can be satisfied
+			for i in 0..17 {
+				if !finish[i] {
+					let mut can_allocate = true;
 						
-						// Release allocated resources
+						// Check if Need[i] <= Work for all resources
 					for j in 0..5 {
-						work[j] += all[i].1[j] as isize;
+						if need[i].1[j] > work[j] as usize {
+							can_allocate = false;
+							break;
+						}
 					}
-						
-					finish[i] = true;
-					break; // Restart search after updating work
+						// Step 3: If found, allocate resources
+					if can_allocate {
+						found = true;
+							
+							// Release allocated resources
+						for j in 0..5 {
+							work[j] += all[i].1[j] as isize;
+						}
+							
+						finish[i] = true;
+						break; // Restart search after updating work
+					}
 				}
 			}
+				
+				// Step 4: If no thread found, break the loop
+			if !found {
+				break;
+			}
 		}
-			
-			// Step 4: If no thread found, break the loop
-		if !found {
-			break;
-		}
-	}
-	let is_safe = finish.iter().all(|&x| x);
+		let is_safe = finish.iter().all(|&x| x);
 
-	if !is_safe {
-		return false;
+		if !is_safe {
+			return false;
+		}
 	}
 	true
 }
