@@ -14,7 +14,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
+use crate::sync::deadlock::DeadlockDetector;
 /// Process Control Block
 pub struct ProcessControlBlock {
     /// immutable
@@ -25,7 +25,13 @@ pub struct ProcessControlBlock {
 
 /// Inner of Process Control Block
 pub struct ProcessControlBlockInner {
-    /// is zombie?
+    ///
+	pub mux_deadlockdectector:DeadlockDetector,
+	///
+	pub sem_deadlockdectector:DeadlockDetector,
+	///
+	pub enable_deadlock_detect:usize,
+	/// is zombie?
     pub is_zombie: bool,
     /// memory set(address space)
     pub memory_set: MemorySet,
@@ -89,6 +95,7 @@ impl ProcessControlBlock {
     pub fn inner_exclusive_access(&self) -> RefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
     }
+
     /// new process from elf file
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         trace!("kernel: ProcessControlBlock::new");
@@ -100,7 +107,10 @@ impl ProcessControlBlock {
             pid: pid_handle,
             inner: unsafe {
                 UPSafeCell::new(ProcessControlBlockInner {
-                    is_zombie: false,
+					mux_deadlockdectector:DeadlockDetector::new(),
+					sem_deadlockdectector:DeadlockDetector::new(),
+                    enable_deadlock_detect:0,
+					is_zombie: false,
                     memory_set,
                     parent: None,
                     children: Vec::new(),
@@ -233,6 +243,9 @@ impl ProcessControlBlock {
             pid,
             inner: unsafe {
                 UPSafeCell::new(ProcessControlBlockInner {
+					mux_deadlockdectector:parent.mux_deadlockdectector.clone(),
+					sem_deadlockdectector:parent.sem_deadlockdectector.clone(),
+					enable_deadlock_detect:parent.enable_deadlock_detect,
                     is_zombie: false,
                     memory_set,
                     parent: Some(Arc::downgrade(self)),

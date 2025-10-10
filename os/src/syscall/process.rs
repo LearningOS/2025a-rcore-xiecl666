@@ -7,7 +7,10 @@ use crate::{
     },
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
-
+use crate::timer::get_time_us;
+use core::slice;
+use crate::mm::translated_byte_buffer;
+use core::mem::size_of;
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
@@ -153,10 +156,37 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_get_time",
         current_task().unwrap().process.upgrade().unwrap().getpid()
     );
-    -1
+	let us = get_time_us();
+	unsafe {
+		let cur_task = current_task().unwrap().process.upgrade().unwrap();
+		let task=cur_task.inner_exclusive_access();
+		let mut tmp=translated_byte_buffer(task.get_user_token(),_ts as *const u8,size_of::<TimeVal>());
+        let time_val= TimeVal {
+            sec: us / 1_000_000,
+            usec: us % 1_000_000,
+        };
+		let time_ptr = &time_val as *const TimeVal;
+		let byte_ptr = time_ptr as *const u8;
+		let src_slice = slice::from_raw_parts(byte_ptr, size_of::<TimeVal>());
+		let mut offset = 0;
+        for buf in tmp.iter_mut() {
+            let len = buf.len();
+            if offset + len > src_slice.len() {
+                // 最后一次复制可能不满
+                let remain = src_slice.len() - offset;
+                buf[..remain].copy_from_slice(&src_slice[offset..offset+remain]);
+                break;
+            } else {
+                buf.copy_from_slice(&src_slice[offset..offset+len]);
+                offset += len;
+            }
+        }
+    }
+
+    0
 }
 
 /// mmap syscall

@@ -54,12 +54,14 @@ impl Mutex for MutexSpin {
 
 /// Blocking Mutex struct
 pub struct MutexBlocking {
-    inner: UPSafeCell<MutexBlockingInner>,
+    ///
+	pub inner: UPSafeCell<MutexBlockingInner>,
 }
 
 pub struct MutexBlockingInner {
     locked: bool,
-    wait_queue: VecDeque<Arc<TaskControlBlock>>,
+    ///
+	pub wait_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
 impl MutexBlocking {
